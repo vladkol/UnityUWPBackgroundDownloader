@@ -527,36 +527,32 @@ public class UWPDownloader
         return res;
     }
 
+#if UNITY_WSA
+    #if ENABLE_IL2CPP
+        [System.Runtime.InteropServices.DllImport("__Internal", ExactSpelling = true, CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    #else
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", ExactSpelling = true, CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    #endif
+        static extern bool GetDiskFreeSpaceExW(
+        string lpDirectoryName,
+        out ulong lpFreeBytesAvailable,
+        out ulong lpTotalNumberOfBytes,
+        out ulong lpTotalNumberOfFreeBytes);
+#endif
+
 #if UNITY_WSA && ENABLE_WINMD_SUPPORT
     public static UInt64 GetDriveFreeSpace(StorageFolder folder)
     {
-        UInt64 result = 0;
-        ManualResetEvent requestEvent = new ManualResetEvent(false);
-        var task = folder.Properties.RetrievePropertiesAsync(new string[] { "System.FreeSpace" });
-        
+        ulong uFree = 0, uTotal = 0, uTotalFree = 0;
 
-        task.Completed = 
-                (asyncInfo, asyncStatus) =>
-                {
-                    if (asyncInfo.Status == Windows.Foundation.AsyncStatus.Completed)
-                    {
-                        result = (UInt64)asyncInfo.GetResults()["System.FreeSpace"];
-                    }
-                    if (asyncStatus != Windows.Foundation.AsyncStatus.Started)
-                    {
-                        requestEvent.Set();
-                    }
-                };
-
-        requestEvent.WaitOne();
-        return result;
+        GetDiskFreeSpaceExW(folder.Path, out uFree, out uTotal, out uTotalFree);
+        return (UInt64)uFree;
     }
 #endif
 
     public static UInt64 GetDownloadSize(Uri uri)
     {
         UInt64 result = 0;
-        string contentLenHeaderValue = string.Empty;
 
         try
         {
@@ -598,18 +594,14 @@ public class UWPDownloader
 #if UNITY_WSA && ENABLE_WINMD_SUPPORT
                 if (response.IsSuccessStatusCode && response.Content != null)
                 {
-                    if (response.Content.Headers.ContainsKey("Content-Length"))
-                    {
-                        response.Content.Headers.TryGetValue("Content-Length", out contentLenHeaderValue);
-                    }
+                    var cl = response.Content.Headers.ContentLength;
+                    if (cl.HasValue)
+                        result = (UInt64)cl.Value;
                 }
 #else
                 result = (UInt64)response.ContentLength;
 #endif
             }
-
-            if (!string.IsNullOrEmpty(contentLenHeaderValue))
-                UInt64.TryParse(contentLenHeaderValue, out result);
         }
         catch (Exception ex)
         {
